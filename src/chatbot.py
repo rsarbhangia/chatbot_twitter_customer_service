@@ -30,7 +30,8 @@ class CustomerSupportChatbot:
         
         # Create the prompt template
         self.prompt = ChatPromptTemplate.from_messages([
-            ("system", """You are a helpful customer support assistant. 
+            ("system", """You are a helpful customer support assistant. You're provided with customer support tweets(Question) and the response from company to those tweets(Answer) as context.
+            
             Use the following context to answer the customer's question.
             If you don't know the answer, just say that you don't know, don't try to make up an answer.
             
@@ -53,32 +54,32 @@ class CustomerSupportChatbot:
         # Initialize chat history
         self.chat_history = []
     
-    def _get_context(self, question: str) -> str:
+    def _get_context(self, query: str) -> str:
         """
         Get relevant context from the RAG system
         
         Args:
-            question: The user's question
+            query: The user's question
             
         Returns:
             A string containing relevant context
         """
-        # Retrieve relevant contexts from RAG system
-        retrieved = self.rag_system.retrieve(question)
-        
+        # Get relevant contexts from the RAG system
+        retrieved = self.rag_system.retrieve(query)
+
         if not retrieved:
             return "No relevant context found."
         
         # Format the context
         context_parts = []
-        for i, (input_text, distance, output_text) in enumerate(retrieved):
+        for i, result in enumerate(retrieved):
             # Convert distance to a similarity score (lower distance = higher similarity)
-            similarity = 1.0 - min(distance / 5.0, 1.0)  # Normalize to 0-1 range
+            similarity = 1.0 - min(result['distance'] / 5.0, 1.0)  # Normalize to 0-1 range
             similarity_percent = int(similarity * 100)
             
             context_parts.append(f"Context {i+1} (Relevance: {similarity_percent}%):")
-            context_parts.append(f"Question: {input_text}")
-            context_parts.append(f"Answer: {output_text}")
+            context_parts.append(f"Question: {result['input_text']}")
+            context_parts.append(f"Answer: {result['output_text']}")
             context_parts.append("")
         
         return "\n".join(context_parts)
@@ -116,6 +117,7 @@ class CustomerSupportChatbot:
         """
         # Get the response from the LLM
         response = self.chain.invoke(query)
+        print(f"LLM Chain Response: {response}")
         
         # Get the contexts and confidence scores from the RAG system
         retrieved = self.rag_system.retrieve(query)
@@ -123,11 +125,11 @@ class CustomerSupportChatbot:
         contexts = []
         confidence_scores = []
         
-        for input_text, distance, output_text in retrieved:
-            contexts.append(input_text)
+        for result in retrieved:
+            contexts.append(result['input_text'])
             # Convert distance to confidence score (lower distance = higher confidence)
             max_distance = 5.0
-            normalized_distance = min(distance, max_distance) / max_distance
+            normalized_distance = min(result['distance'], max_distance) / max_distance
             confidence = int((1 - normalized_distance) * 100)
             confidence_scores.append(confidence)
         

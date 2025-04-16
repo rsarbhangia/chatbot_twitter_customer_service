@@ -2,11 +2,10 @@ from datasets import load_dataset
 from sentence_transformers import SentenceTransformer
 import faiss
 import numpy as np
-from typing import List, Tuple
-import torch
-import os
-from pathlib import Path
 import pandas as pd
+from typing import List, Tuple
+import pickle
+from pathlib import Path
 
 class RAGSystem:
     def __init__(self):
@@ -16,36 +15,31 @@ class RAGSystem:
         self.input_texts = []
         self.output_texts = []
         self.chat_history = []  # Store chat history as (query, response) pairs
+        
+        # Define cache paths
+        self.cache_dir = Path("../cache")
+        self.cache_dir.mkdir(exist_ok=True)
+        self.dataset_cache_path = self.cache_dir / "customer_support_dataset.pkl"
+        self.embeddings_cache_path = self.cache_dir / "embeddings.npy"
+        self.index_cache_path = self.cache_dir / "faiss_index.bin"
+        
         self._prepare_index()
 
     def _prepare_index(self):
         """Prepare the FAISS index with the customer support tweets dataset"""
         print("Preparing the index with customer support tweets dataset...")
         
-        try:
-            # Load the dataset using pandas
-            print("Loading dataset with pandas...")
+        # Check if we have cached data
+        if self._load_cached_data():
+            print("Using cached dataset and embeddings.")
+            return
             
-            # Try to load the dataset from the Hugging Face datasets
-            try:
-                df = pd.read_json("hf://datasets/MohammadOthman/mo-customer-support-tweets-945k/preprocessed_data.json")
-                print(f"Dataset loaded successfully with {len(df)} rows")
-            except Exception as e:
-                print(f"Error loading from Hugging Face: {str(e)}")
-                print("Trying to download the dataset first...")
-                
-                # Try to download the dataset first
-                dataset = load_dataset("MohammadOthman/mo-customer-support-tweets-945k")
-                
-                # Convert to pandas DataFrame
-                if 'train' in dataset:
-                    df = dataset['train'].to_pandas()
-                else:
-                    # If no 'train' split, use the first available split
-                    first_split = list(dataset.keys())[0]
-                    df = dataset[first_split].to_pandas()
-                
-                print(f"Dataset loaded and converted to DataFrame with {len(df)} rows")
+        try:
+            # Load the dataset using the Hugging Face datasets API
+            print("Loading dataset from Hugging Face...")
+
+            df = pd.read_json("hf://datasets/MohammadOthman/mo-customer-support-tweets-945k/preprocessed_data.json")
+            print(f"Dataset loaded and converted to DataFrame with {len(df)} rows")
             
             # Extract text from the DataFrame
             # Check what columns are available
@@ -91,83 +85,89 @@ class RAGSystem:
             if len(self.texts) == 0:
                 raise ValueError("No texts loaded from dataset")
             
+            # Cache the dataset
+            self._cache_dataset()
+            
             # Create embeddings for the dataset
             print("Creating embeddings...")
             embeddings = self.model.encode(self.texts, show_progress_bar=True)
             print(f"Embeddings shape: {embeddings.shape}")
+            
+            # Cache the embeddings
+            self._cache_embeddings(embeddings)
             
             # Create FAISS index with the dataset
             dimension = embeddings.shape[1]
             print(f"Creating FAISS index with dimension {dimension}")
             self.index = faiss.IndexFlatL2(dimension)
             self.index.add(np.array(embeddings).astype('float32'))
+            
+            # Cache the FAISS index
+            self._cache_index()
+            
             print("Customer support tweets index preparation completed!")
             
         except Exception as e:
             print(f"Error loading dataset: {str(e)}")
-            print("Using sample data instead...")
+            print("Please download the dataset.")
             
-            # Use a small sample dataset as fallback
-            self.input_texts = [
-                "How do I reset my password?",
-                "I can't access my account",
-                "The website is not loading properly",
-                "How do I contact customer support?",
-                "My order hasn't arrived yet",
-                "I need to update my shipping address",
-                "Can I get a refund for my recent purchase?",
-                "The product I received is damaged",
-                "How do I track my order?",
-                "I forgot my username",
-                "The app keeps crashing",
-                "How do I change my email preferences?",
-                "I want to cancel my subscription",
-                "The payment was declined",
-                "How do I download my invoice?",
-                "I need to change my delivery date",
-                "The product is out of stock",
-                "How do I apply a discount code?",
-                "I'm having trouble with the checkout process",
-                "Can you help me find a specific item?"
-            ]
+            raise ValueError("Failed to prepare index. Please ensure the dataset is accessible and properly formatted.")
+
+    def _cache_dataset(self):
+        """Cache the dataset to disk"""
+        print(f"Caching dataset to {self.dataset_cache_path}")
+        with open(self.dataset_cache_path, 'wb') as f:
+            pickle.dump({
+                'input_texts': self.input_texts,
+                'output_texts': self.output_texts,
+                'texts': self.texts
+            }, f)
+        print("Dataset cached successfully")
+
+    def _cache_embeddings(self, embeddings):
+        """Cache the embeddings to disk"""
+        print(f"Caching embeddings to {self.embeddings_cache_path}")
+        np.save(self.embeddings_cache_path, embeddings)
+        print("Embeddings cached successfully")
+
+    def _cache_index(self):
+        """Cache the FAISS index to disk"""
+        print(f"Caching FAISS index to {self.index_cache_path}")
+        faiss.write_index(self.index, str(self.index_cache_path))
+        print("FAISS index cached successfully")
+
+    def _load_cached_data(self):
+        """Load cached data if available"""
+        # Check if all cache files exist
+        if not (self.dataset_cache_path.exists() and 
+                self.embeddings_cache_path.exists() and 
+                self.index_cache_path.exists()):
+            print("Cache files not found. Will download and process data.")
+            return False
+        
+        try:
+            # Load dataset
+            print(f"Loading cached dataset from {self.dataset_cache_path}")
+            with open(self.dataset_cache_path, 'rb') as f:
+                data = pickle.load(f)
+                self.input_texts = data['input_texts']
+                self.output_texts = data['output_texts']
+                self.texts = data['texts']
             
-            # Create sample outputs
-            self.output_texts = [
-                "To reset your password, click on the 'Forgot Password' link on the login page and follow the instructions sent to your email.",
-                "If you can't access your account, try clearing your browser cache or using a different browser. If the issue persists, contact our support team.",
-                "Please try refreshing the page or clearing your browser cache. If the problem continues, it might be a temporary server issue.",
-                "You can contact our customer support team by email at support@example.com or by phone at 1-800-123-4567.",
-                "We apologize for the delay. Please check your order tracking number in your account. If it's been more than 5 business days, contact our support team.",
-                "You can update your shipping address in your account settings under 'Shipping Information' or contact our support team for assistance.",
-                "Refund requests can be submitted through your account under 'Order History'. Select the order and click 'Request Refund'.",
-                "We're sorry to hear that. Please take photos of the damaged product and contact our support team for a replacement or refund.",
-                "You can track your order by logging into your account and going to 'Order History', or by using the tracking number sent to your email.",
-                "If you've forgotten your username, you can retrieve it by entering your email address on the login page and clicking 'Forgot Username'.",
-                "Please try updating the app to the latest version. If the issue persists, try uninstalling and reinstalling the app.",
-                "You can change your email preferences in your account settings under 'Communication Preferences'.",
-                "To cancel your subscription, go to your account settings, select 'Subscriptions', and click 'Cancel Subscription'.",
-                "The payment might have been declined due to insufficient funds or incorrect card information. Please verify your payment details and try again.",
-                "You can download your invoice by logging into your account, going to 'Order History', selecting the order, and clicking 'Download Invoice'.",
-                "You can change your delivery date by logging into your account, going to 'Order History', selecting the order, and clicking 'Change Delivery Date'.",
-                "We apologize for the inconvenience. You can sign up for notifications when the product is back in stock by clicking the 'Notify Me' button.",
-                "To apply a discount code, enter it in the 'Promo Code' field at checkout and click 'Apply'.",
-                "If you're having trouble with checkout, try using a different browser or clearing your cache. If the issue persists, contact our support team.",
-                "You can search for specific items using the search bar at the top of our website. You can also browse categories or use filters to narrow down results."
-            ]
+            # Load embeddings
+            print(f"Loading cached embeddings from {self.embeddings_cache_path}")
+            embeddings = np.load(self.embeddings_cache_path)
             
-            self.texts = self.input_texts
+            # Load FAISS index
+            print(f"Loading cached FAISS index from {self.index_cache_path}")
+            self.index = faiss.read_index(str(self.index_cache_path))
             
-            # Create embeddings for sample data
-            print("Creating embeddings for sample data...")
-            embeddings = self.model.encode(self.texts, show_progress_bar=True)
-            print(f"Sample embeddings shape: {embeddings.shape}")
-            
-            # Create FAISS index with sample data
-            dimension = embeddings.shape[1]
-            print(f"Creating FAISS index with dimension {dimension}")
-            self.index = faiss.IndexFlatL2(dimension)
-            self.index.add(np.array(embeddings).astype('float32'))
-            print("Sample data index preparation completed!")
+            print("Successfully loaded all cached data")
+            return True
+        except Exception as e:
+            print(f"Error loading cached data: {str(e)}")
+            print("Will download and process data instead.")
+            return False
 
     def retrieve(self, query: str, k: int = 3) -> List[Tuple[str, float, str]]:
         """Retrieve relevant contexts for the query"""

@@ -94,6 +94,10 @@ async def get_interactions(limit: int = 10, db: Session = Depends(get_db)):
         for interaction in interactions
     ]
 
+@app.get("/health")
+async def health_check():
+    return {"status": "healthy"}
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="127.0.0.1", port=8000)

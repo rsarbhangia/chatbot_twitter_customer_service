@@ -9,12 +9,15 @@ import json
 
 from database import get_db, CustomerInteraction
 from rag import RAGSystem
+from chatbot import CustomerSupportChatbot
 
 app = FastAPI(title="Customer Support AI API")
-app.mount("/static", StaticFiles(directory="static"), name="static")
-templates = Jinja2Templates(directory="templates")
+app.mount("/static", StaticFiles(directory="../static"), name="static")
+templates = Jinja2Templates(directory="../templates")
 
+# Initialize the RAG system and chatbot
 rag_system = RAGSystem()
+chatbot = CustomerSupportChatbot(rag_system=rag_system)
 
 class Query(BaseModel):
     text: str
@@ -46,7 +49,8 @@ async def process_query(request: Request, db: Session = Depends(get_db)):
     
     try:
         print(f"Processing query: {query}")
-        response, contexts, confidence_scores = rag_system.process_query(query)
+        # Use the chatbot to process the query
+        response, contexts, confidence_scores = chatbot.process_query(query)
         print(f"Response: {response}")
         print(f"Contexts: {contexts}")
         print(f"Confidence scores: {confidence_scores}")
@@ -92,4 +96,4 @@ async def get_interactions(limit: int = 10, db: Session = Depends(get_db)):
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000) 
+    uvicorn.run(app, host="127.0.0.1", port=8000)

@@ -2,8 +2,14 @@ from sqlalchemy import create_engine, Column, Integer, String, Text, DateTime
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 from datetime import datetime
+from pathlib import Path
 
-SQLALCHEMY_DATABASE_URL = "sqlite:///./customer_support.db"
+# Create database directory if it doesn't exist
+DB_DIR = Path("database")
+DB_DIR.mkdir(exist_ok=True)
+
+# Update database URL
+SQLALCHEMY_DATABASE_URL = "sqlite:///database/customer_support.db"
 
 engine = create_engine(
     SQLALCHEMY_DATABASE_URL, connect_args={"check_same_thread": False}

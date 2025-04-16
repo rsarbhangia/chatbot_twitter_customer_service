@@ -6,14 +6,29 @@ from sqlalchemy.orm import Session
 from pydantic import BaseModel
 from typing import List, Optional
 import json
+from fastapi.middleware.cors import CORSMiddleware
+import os
+from dotenv import load_dotenv
+import pathlib
 
 from database import get_db, CustomerInteraction
 from rag import RAGSystem
 from chatbot import CustomerSupportChatbot
 
+load_dotenv()
+
 app = FastAPI(title="Customer Support AI API")
-app.mount("/static", StaticFiles(directory="../static"), name="static")
-templates = Jinja2Templates(directory="../templates")
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["https://chatbot-twitter-customer-service.onrender.com"],  # In production, replace with your frontend URL
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+BASE_DIR = pathlib.Path(__file__).parent.parent
+app.mount("/static", StaticFiles(directory=str(BASE_DIR / "static")), name="static")
+templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
 
 # Initialize the RAG system and chatbot
 rag_system = RAGSystem()
@@ -100,4 +115,9 @@ async def health_check():
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="127.0.0.1", port=8000)
+    port = int(os.getenv("PORT", 8000))  # Get port from environment variable or default to 8000
+    uvicorn.run(
+        app, 
+        host="0.0.0.0",  # Changed from 127.0.0.1 to allow external connections
+        port=port
+    )

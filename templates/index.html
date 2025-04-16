@@ -1,0 +1,340 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Customer Support Assistant</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body {
+            background-color: #000000;
+            color: #ffffff;
+            padding-top: 80px; /* Add padding to account for fixed header */
+        }
+        .chat-container {
+            background-color: #111111;
+            border: 1px solid #333333;
+        }
+        .user-message {
+            background-color: #1a1a1a;
+            border: 1px solid #333333;
+        }
+        .assistant-message {
+            background-color: #1a1a1a;
+            border: 1px solid #333333;
+        }
+        .history-panel {
+            background-color: #111111;
+            border: 1px solid #333333;
+        }
+        .context-item {
+            background-color: #1a1a1a;
+            border: 1px solid #333333;
+        }
+        .loading {
+            color: #4CAF50;
+        }
+        .error {
+            color: #f44336;
+        }
+        .confidence {
+            color: #4CAF50;
+        }
+        .timestamp {
+            color: #888888;
+        }
+        .context-confidence {
+            color: #4CAF50;
+        }
+        .message {
+            max-width: 80%;
+            margin: 10px;
+            padding: 10px 15px;
+            border-radius: 15px;
+        }
+        .context-panel {
+            background-color: #111111;
+            border-radius: 10px;
+            margin-top: 10px;
+            font-size: 0.9em;
+        }
+        .history-panel {
+            position: fixed;
+            top: 0;
+            bottom: 0;
+            width: 400px;
+            background: #111111;
+            box-shadow: -2px 0 5px rgba(0, 0, 0, 0.3);
+            transform: translateX(100%);
+            transition: transform 0.3s ease;
+            right: 0;
+            z-index: 1000;
+        }
+        .history-panel.open {
+            transform: translateX(0);
+        }
+        .score-bar {
+            height: 4px;
+            background-color: #4CAF50;
+            transition: width 0.3s ease;
+        }
+        .tab-button {
+            background-color: #1a1a1a;
+            color: #ffffff;
+            padding: 8px 16px;
+            border: 1px solid #333333;
+            border-radius: 4px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+        .tab-button:hover {
+            background-color: #333333;
+        }
+        .tab-button.active {
+            background-color: #4CAF50;
+            border-color: #4CAF50;
+        }
+        .tab-content {
+            display: none;
+            padding: 16px;
+            background-color: #111111;
+            border: 1px solid #333333;
+            border-radius: 4px;
+            margin-top: 8px;
+        }
+        .tab-content.active {
+            display: block;
+        }
+        .logo {
+            height: 40px;
+            width: auto;
+            margin-right: 16px;
+        }
+        .text-logo {
+            font-family: 'Arial', sans-serif;
+            font-weight: bold;
+            font-size: 24px;
+            color: #00A4EF;
+            text-decoration: none;
+            display: flex;
+            align-items: center;
+            margin-right: 16px;
+        }
+        .text-logo span {
+            color: #ffffff;
+        }
+        .fixed-header {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            background-color: #000000;
+            z-index: 100;
+            padding: 16px;
+            border-bottom: 1px solid #333333;
+        }
+    </style>
+</head>
+<body>
+    <!-- Fixed Header -->
+    <div class="fixed-header">
+        <div class="container mx-auto px-4">
+            <div class="flex justify-between items-center">
+                <div class="flex items-center">
+                    <img src="/static/images/celonis_logo.png" alt="Celonis Logo" class="logo">
+                    <h1 class="text-3xl font-bold">AI Customer Support Assistant</h1>
+                </div>
+                <div class="space-x-4">
+                    <button id="contextsBtn" class="tab-button">Similar Conversations</button>
+                    <button id="historyBtn" class="tab-button">View History</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="container mx-auto px-4 py-8">
+        <div class="bg-[#111111] rounded-lg shadow-lg p-6">
+            <div id="chat-messages" class="chat-container overflow-y-auto mb-6">
+                <div class="assistant-message message">
+                    Hello! I'm your AI customer support assistant. How can I help you today?
+                </div>
+            </div>
+            
+            <form id="chat-form" class="flex gap-4">
+                <input type="text" 
+                       id="question" 
+                       class="flex-1 p-3 border rounded-lg focus:outline-none focus:ring-2 focus:ring-[#4CAF50] bg-[#1a1a1a] text-white border-[#333333]"
+                       placeholder="Type your question here..."
+                       required>
+                <button type="submit" 
+                        class="bg-[#4CAF50] text-white px-6 py-3 rounded-lg hover:bg-[#45a049] transition-colors">
+                    Send
+                </button>
+            </form>
+        </div>
+
+        <!-- Contexts Panel -->
+        <div id="contextsPanel" class="tab-content">
+            <h2 class="text-xl font-bold mb-4">Similar Support Conversations</h2>
+            <div id="contextsContent" class="space-y-4"></div>
+        </div>
+    </div>
+
+    <!-- History Panel -->
+    <div id="historyPanel" class="history-panel p-6 overflow-y-auto">
+        <div class="flex justify-between items-center mb-6">
+            <h2 class="text-xl font-bold">Chat History</h2>
+            <button id="closeHistory" class="text-gray-500 hover:text-gray-700">✕</button>
+        </div>
+        <div id="historyContent" class="space-y-4"></div>
+    </div>
+
+    <script>
+        const chatForm = document.getElementById('chat-form');
+        const chatMessages = document.getElementById('chat-messages');
+        const questionInput = document.getElementById('question');
+        const historyBtn = document.getElementById('historyBtn');
+        const contextsBtn = document.getElementById('contextsBtn');
+        const historyPanel = document.getElementById('historyPanel');
+        const contextsPanel = document.getElementById('contextsPanel');
+        const closeHistory = document.getElementById('closeHistory');
+        const historyContent = document.getElementById('historyContent');
+        const contextsContent = document.getElementById('contextsContent');
+
+        let currentContexts = [];
+        let currentConfidenceScores = [];
+
+        // Panel controls
+        historyBtn.addEventListener('click', () => {
+            historyPanel.classList.add('open');
+            loadChatHistory();
+        });
+
+        contextsBtn.addEventListener('click', () => {
+            contextsPanel.classList.toggle('active');
+            contextsBtn.classList.toggle('active');
+            if (contextsPanel.classList.contains('active')) {
+                updateContextsPanel();
+            }
+        });
+
+        closeHistory.addEventListener('click', () => {
+            historyPanel.classList.remove('open');
+        });
+
+        function updateContextsPanel() {
+            if (currentContexts.length > 0) {
+                contextsContent.innerHTML = currentContexts.map((context, i) => {
+                    const confidence = currentConfidenceScores[i] || 0;
+                    return `
+                        <div class="context-item p-3 mb-2">
+                            <div class="flex justify-between items-center mb-1">
+                                <div class="text-sm context-confidence">Confidence: ${confidence}%</div>
+                            </div>
+                            <div class="score-bar mb-2" style="width: ${confidence}%"></div>
+                            <div class="text-white">${context}</div>
+                        </div>
+                    `;
+                }).join('');
+            } else {
+                contextsContent.innerHTML = '<div class="text-gray-500">No similar conversations available</div>';
+            }
+        }
+
+        async function loadChatHistory() {
+            try {
+                const response = await fetch('/interactions');
+                const interactions = await response.json();
+                
+                historyContent.innerHTML = interactions.map(interaction => `
+                    <div class="bg-[#1a1a1a] p-4 rounded-lg shadow">
+                        <div class="text-sm timestamp">${new Date(interaction.timestamp).toLocaleString()}</div>
+                        <div class="font-medium mt-1">Q: ${interaction.query}</div>
+                        <div class="mt-2">A: ${interaction.response}</div>
+                        <div class="text-sm confidence mt-2">Confidence: ${interaction.confidence_score}%</div>
+                    </div>
+                `).join('');
+            } catch (error) {
+                console.error('Error loading chat history:', error);
+                historyContent.innerHTML = '<div class="text-red-500">Error loading chat history</div>';
+            }
+        }
+
+        chatForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            
+            const question = questionInput.value.trim();
+            if (!question) return;
+            
+            // Add user message to chat
+            const userMessageDiv = document.createElement('div');
+            userMessageDiv.className = 'user-message message';
+            userMessageDiv.textContent = question;
+            chatMessages.appendChild(userMessageDiv);
+            
+            // Clear input
+            questionInput.value = '';
+            
+            // Show loading indicator
+            const loadingDiv = document.createElement('div');
+            loadingDiv.className = 'assistant-message message';
+            loadingDiv.textContent = 'Thinking...';
+            chatMessages.appendChild(loadingDiv);
+            
+            // Scroll to bottom
+            chatMessages.scrollTop = chatMessages.scrollHeight;
+            
+            try {
+                // Send request to API
+                const response = await fetch('/query', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ text: question })
+                });
+                
+                const data = await response.json();
+                
+                // Remove loading indicator
+                chatMessages.removeChild(loadingDiv);
+                
+                // Add assistant message
+                const assistantMessageDiv = document.createElement('div');
+                assistantMessageDiv.className = 'assistant-message message';
+                assistantMessageDiv.textContent = data.response;
+                chatMessages.appendChild(assistantMessageDiv);
+                
+                // Store contexts for the tab
+                if (data.contexts && data.contexts.length > 0) {
+                    currentContexts = data.contexts;
+                    currentConfidenceScores = data.confidence_scores || [];
+                    contextsBtn.classList.add('active');
+                } else {
+                    currentContexts = [];
+                    currentConfidenceScores = [];
+                    contextsBtn.classList.remove('active');
+                }
+                
+                // Scroll to bottom
+                chatMessages.scrollTop = chatMessages.scrollHeight;
+                
+            } catch (error) {
+                console.error('Error sending message:', error);
+                
+                // Remove loading indicator
+                chatMessages.removeChild(loadingDiv);
+                
+                // Add error message
+                const errorDiv = document.createElement('div');
+                errorDiv.className = 'assistant-message message';
+                errorDiv.textContent = 'Sorry, there was an error processing your request. Please try again.';
+                chatMessages.appendChild(errorDiv);
+                
+                // Scroll to bottom
+                chatMessages.scrollTop = chatMessages.scrollHeight;
+            }
+        });
+    </script>
+</body>
+</html> 

@@ -9,6 +9,7 @@ services:
       - ./src/database:/app/database
       - ./static:/app/static
       - ./templates:/app/templates
+      - ./logs:/app/logs
     env_file:
       - /src/.env
     environment:

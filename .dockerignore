@@ -22,3 +22,4 @@ DOCKER_GUIDE.md
 requirements_new.txt
 requirements_bak.txt
 render.yaml 
+logs/

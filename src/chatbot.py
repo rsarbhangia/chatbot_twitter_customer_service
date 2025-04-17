@@ -6,9 +6,12 @@ from langchain.schema import StrOutputParser
 from langchain.schema.runnable import RunnablePassthrough
 from dotenv import load_dotenv
 from rag import RAGSystem
+from logger_config import setup_logger
 
 # Load environment variables
 load_dotenv()
+
+logger = setup_logger(__name__)
 
 class CustomerSupportChatbot:
     def __init__(self, rag_system: RAGSystem = None):
@@ -20,6 +23,7 @@ class CustomerSupportChatbot:
         """
         # Initialize the RAG system if not provided
         self.rag_system = rag_system or RAGSystem()
+        logger.info("CustomerSupportChatbot initialized")
         
         # Initialize the LLM
         self.llm = ChatOpenAI(
@@ -115,25 +119,35 @@ class CustomerSupportChatbot:
         Returns:
             A tuple containing (response, contexts, confidence_scores)
         """
-        # Get the response from the LLM
-        response = self.chain.invoke(query)
-        print(f"LLM Chain Response: {response}")
-        
-        # Get the contexts and confidence scores from the RAG system
-        retrieved = self.rag_system.retrieve(query)
-        
-        contexts = []
-        confidence_scores = []
-        
-        for result in retrieved:
-            contexts.append(result['input_text'])
-            # Convert distance to confidence score (lower distance = higher confidence)
-            max_distance = 5.0
-            normalized_distance = min(result['distance'], max_distance) / max_distance
-            confidence = int((1 - normalized_distance) * 100)
-            confidence_scores.append(confidence)
-        
-        # Update chat history
-        self.chat_history.append((query, response))
-        
-        return response, contexts, confidence_scores 
+        try:
+            logger.debug(f"Processing query: {query}")
+            
+            # Get the response from the LLM
+            response = self.chain.invoke(query)
+            logger.debug(f"LLM Chain Response: {response}")
+            
+            # Get the contexts and confidence scores from the RAG system
+            retrieved = self.rag_system.retrieve(query)
+            
+            contexts = []
+            confidence_scores = []
+            
+            for result in retrieved:
+                contexts.append(result['input_text'])
+                # Convert distance to confidence score (lower distance = higher confidence)
+                max_distance = 5.0
+                normalized_distance = min(result['distance'], max_distance) / max_distance
+                confidence = int((1 - normalized_distance) * 100)
+                confidence_scores.append(confidence)
+            
+            # Update chat history
+            self.chat_history.append((query, response))
+            
+            logger.debug(f"Retrieved {len(contexts)} relevant contexts")
+            logger.debug(f"Generated response: {response}")
+            
+            return response, contexts, confidence_scores
+            
+        except Exception as e:
+            logger.error(f"Error in process_query: {str(e)}", exc_info=True)
+            raise

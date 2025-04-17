@@ -22,6 +22,7 @@ class CustomerInteraction(Base):
     __tablename__ = "customer_interactions"
 
     id = Column(Integer, primary_key=True, index=True)
+    session_id = Column(String, index=True)
     query = Column(Text)
     response = Column(Text)
     timestamp = Column(DateTime, default=datetime.utcnow)

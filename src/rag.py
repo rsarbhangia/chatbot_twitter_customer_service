@@ -1,4 +1,3 @@
-from datasets import load_dataset
 from sentence_transformers import SentenceTransformer
 import faiss
 import numpy as np

@@ -28,6 +28,8 @@ class CustomerInteraction(Base):
     timestamp = Column(DateTime, default=datetime.utcnow)
     context_used = Column(Text)
     confidence_score = Column(Integer)
+    evaluation = Column(Text)  # Store evaluation results as JSON string
+    reasoning = Column(Text)  # Store reasoning as text
 
 # Check if tables exist before creating them
 def init_db():

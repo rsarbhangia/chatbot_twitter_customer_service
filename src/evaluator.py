@@ -34,20 +34,20 @@ class ResponseEvaluator:
         6. Context Usage: How effectively were the similar support conversations utilized?
 
         Provide your evaluation in the following JSON format:
-        {
-            "scores": {
+        {{
+            "scores": {{
                 "relevance": score,
                 "correctness": score,
                 "completeness": score,
                 "clarity": score,
                 "empathy": score,
                 "context_usage": score
-            },
+            }},
             "average_score": average,
             "strengths": ["strength1", "strength2"],
             "weaknesses": ["weakness1", "weakness2"],
             "improvement_suggestions": ["suggestion1", "suggestion2"]
-        }
+        }}
         """)
 
     async def evaluate_response(

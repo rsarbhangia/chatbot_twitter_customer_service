@@ -1,8 +1,8 @@
-from sentence_transformers import SentenceTransformer
+from sentence_transformers import SentenceTransformer, CrossEncoder
 import faiss
 import numpy as np
 import pandas as pd
-from typing import List, Tuple, Dict, Any
+from typing import List, Tuple, Dict, Any, Optional
 import pickle
 from pathlib import Path
 from logger_config import setup_logger
@@ -10,7 +10,20 @@ from logger_config import setup_logger
 logger = setup_logger(__name__)
 
 class RAGSystem:
-    def __init__(self):
+    def __init__(self, search_method: str = "knn", rerank_method: Optional[str] = None):
+        """
+        Initialize RAG System
+        
+        Args:
+            search_method: The search method to use. Options are:
+                - "knn": Exact K-Nearest Neighbors search (default)
+                - "ann": Approximate Nearest Neighbors search
+            rerank_method: The reranking method to use. Options are:
+                - None: No reranking (default)
+                - "cross_encoder": Use Cross-Encoder for reranking
+                - "context_aware": Use context-aware reranking
+                - "both": Use both Cross-Encoder and context-aware reranking
+        """
         logger.info("Initializing RAG System")
         self.model = SentenceTransformer('all-MiniLM-L6-v2')
         self.index = None
@@ -18,6 +31,21 @@ class RAGSystem:
         self.output_texts = []
         self.combined_texts = []  # Store combined input-output pairs
         self.chat_history = []  # Store chat history as (query, response) pairs
+        
+        # Validate search method
+        if search_method not in ["knn", "ann"]:
+            raise ValueError("search_method must be either 'knn' or 'ann'")
+        self.search_method = search_method
+        
+        # Validate rerank method
+        if rerank_method not in [None, "cross_encoder", "context_aware", "both"]:
+            raise ValueError("rerank_method must be None, 'cross_encoder', 'context_aware', or 'both'")
+        self.rerank_method = rerank_method
+        
+        # Initialize cross-encoder if needed
+        if rerank_method in ["cross_encoder", "both"]:
+            logger.info("Initializing Cross-Encoder model for reranking")
+            self.cross_encoder = CrossEncoder('cross-encoder/ms-marco-MiniLM-L-6-v2')
         
         # Define cache paths
         self.cache_dir = Path("../cache")
@@ -58,8 +86,8 @@ class RAGSystem:
             if input_column and output_column:
                 logger.info(f"Using '{input_column}' as input column and '{output_column}' as output column")
                 # Store both input and output texts
-                self.input_texts = df[input_column].tolist()[:10000]  # Using first 10k examples
-                self.output_texts = df[output_column].tolist()[:10000]
+                self.input_texts = df[input_column].tolist() #[:10000]  # Using first 10k examples
+                self.output_texts = df[output_column].tolist() #[:10000]
                 
                 # Create combined input-output pairs for better context
                 self.combined_texts = [
@@ -88,8 +116,29 @@ class RAGSystem:
             # Create FAISS index with combined texts
             dimension = embeddings.shape[1]
             logger.info(f"Creating FAISS index with dimension {dimension}")
-            self.index = faiss.IndexFlatL2(dimension)
-            self.index.add(np.array(embeddings).astype('float32'))
+            
+            if self.search_method == "knn":
+                logger.info("Using KNN (exact) search with IndexFlatL2")
+                self.index = faiss.IndexFlatL2(dimension)
+                self.index.add(np.array(embeddings).astype('float32'))
+            else:  # ann
+                logger.info("Using ANN (approximate) search with IndexIVFFlat")
+                # Create a quantizer for the index
+                quantizer = faiss.IndexFlatL2(dimension)
+                
+                # Create the IVF index with 100 clusters
+                nlist = 100  # number of clusters/centroids
+                self.index = faiss.IndexIVFFlat(quantizer, dimension, nlist, faiss.METRIC_L2)
+                
+                # Train the index
+                logger.info("Training the IVF index...")
+                self.index.train(np.array(embeddings).astype('float32'))
+                
+                # Add vectors to the index
+                self.index.add(np.array(embeddings).astype('float32'))
+                
+                # Set search parameters
+                self.index.nprobe = 10  # number of clusters to visit during search
             
             # Cache the FAISS index
             self._cache_index()
@@ -158,7 +207,92 @@ class RAGSystem:
             logger.info("Will download and process data instead.")
             return False
 
-    def retrieve(self, query: str, k: int = 3) -> List[Dict[str, Any]]:
+    def _rerank_with_cross_encoder(self, query: str, results: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """Rerank results using Cross-Encoder model"""
+        if not results:
+            return results
+            
+        # Prepare pairs for cross-encoder
+        pairs = [(query, result['input_text']) for result in results]
+        
+        # Get cross-encoder scores
+        cross_scores = self.cross_encoder.predict(pairs)
+        
+        # Add cross-encoder scores to results
+        for result, score in zip(results, cross_scores):
+            result['cross_score'] = float(score)
+        
+        # Sort by cross-encoder score (higher is better)
+        results.sort(key=lambda x: x['cross_score'], reverse=True)
+        
+        return results
+
+    def _rerank_with_context(self, query: str, results: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """Rerank results using context awareness"""
+        if not results or not self.chat_history:
+            return results
+            
+        # Get recent chat history
+        recent_history = self.chat_history[-3:]  # Last 3 exchanges
+        
+        # Calculate context relevance scores
+        for result in results:
+            # Initialize context score
+            context_score = 0.0
+            
+            # Check relevance to recent history
+            for hist_query, hist_response in recent_history:
+                # Calculate similarity with historical query
+                query_similarity = self.model.encode([hist_query, result['input_text']])
+                query_sim_score = np.dot(query_similarity[0], query_similarity[1]) / (
+                    np.linalg.norm(query_similarity[0]) * np.linalg.norm(query_similarity[1])
+                )
+                
+                # Calculate similarity with historical response
+                response_similarity = self.model.encode([hist_response, result['output_text']])
+                response_sim_score = np.dot(response_similarity[0], response_similarity[1]) / (
+                    np.linalg.norm(response_similarity[0]) * np.linalg.norm(response_similarity[1])
+                )
+                
+                # Combine scores (you can adjust weights)
+                context_score += 0.6 * query_sim_score + 0.4 * response_sim_score
+            
+            # Normalize context score
+            context_score /= len(recent_history)
+            result['context_score'] = float(context_score)
+        
+        # Sort by context score (higher is better)
+        results.sort(key=lambda x: x['context_score'], reverse=True)
+        
+        return results
+
+    def _combine_reranking_scores(self, results: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """Combine scores from different reranking methods"""
+        for result in results:
+            # Initialize combined score
+            combined_score = 0.0
+            weights = []
+            
+            # Add cross-encoder score if available
+            if 'cross_score' in result:
+                combined_score += result['cross_score']
+                weights.append(0.6)  # Weight for cross-encoder
+            
+            # Add context score if available
+            if 'context_score' in result:
+                combined_score += result['context_score']
+                weights.append(0.4)  # Weight for context
+            
+            # Normalize by weights
+            if weights:
+                result['combined_score'] = combined_score / sum(weights)
+        
+        # Sort by combined score
+        results.sort(key=lambda x: x['combined_score'], reverse=True)
+        
+        return results
+
+    def retrieve(self, query: str, k: int = 5) -> List[Dict[str, Any]]:
         """Retrieve relevant contexts using combined input-output pairs"""
         logger.debug(f"Retrieving contexts for query: {query}")
         
@@ -174,9 +308,12 @@ class RAGSystem:
             logger.warning("Warning: Index is None, returning empty results")
             return []
         
+        # Retrieve more candidates for reranking if needed
+        initial_k = k * 3 if self.rerank_method else k
+        
         # Retrieve using combined input-output pairs
         distances, indices = self.index.search(
-            np.array(query_vector).astype('float32'), k
+            np.array(query_vector).astype('float32'), initial_k
         )
         logger.debug(f"Distances: {distances}")
         logger.debug(f"Indices: {indices}")
@@ -192,8 +329,21 @@ class RAGSystem:
                     'distance': float(distance)
                 })
         
-        logger.debug(f"Retrieved {len(results)} results")
-        return results
+        # Apply reranking if specified
+        if self.rerank_method in ["cross_encoder", "both"]:
+            logger.debug("Applying Cross-Encoder reranking")
+            results = self._rerank_with_cross_encoder(query, results)
+            
+        if self.rerank_method in ["context_aware", "both"]:
+            logger.debug("Applying context-aware reranking")
+            results = self._rerank_with_context(query, results)
+            
+        if self.rerank_method == "both":
+            logger.debug("Combining reranking scores")
+            results = self._combine_reranking_scores(results)
+        
+        # Return top k results
+        return results[:k]
     
     def _enhance_query_with_history(self, query: str, max_history: int = 3) -> str:
         """Enhance the current query with context from chat history"""

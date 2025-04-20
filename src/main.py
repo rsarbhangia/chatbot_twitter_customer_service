@@ -4,7 +4,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import HTMLResponse, JSONResponse
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
-from typing import List, Optional, Dict
+from typing import List, Optional, Dict, Any
 import json
 import uvicorn
 from fastapi.middleware.cors import CORSMiddleware
@@ -15,10 +15,12 @@ import uuid
 from datetime import datetime, timedelta
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from contextlib import asynccontextmanager
+from fastapi import HTTPException
 
 from database import get_db, CustomerInteraction
 from rag import RAGSystem
 from chatbot import CustomerSupportChatbot
+from evaluator import ResponseEvaluator
 from logger_config import setup_logger
 
 # Set up logger
@@ -40,8 +42,19 @@ app.mount("/static", StaticFiles(directory=str(BASE_DIR / "static")), name="stat
 templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
 
 # Initialize the RAG system and chatbot
-rag_system = RAGSystem()
+# Get search method from environment variables, default to "knn"
+search_method = os.getenv("SEARCH_METHOD", "knn")
+logger.info(f"Using search method: {search_method}")
+
+# Get rerank method from environment variables, default to None
+rerank_method = os.getenv("RERANK_METHOD", None)
+logger.info(f"Using rerank method: {rerank_method}")
+
+rag_system = RAGSystem(search_method=search_method, rerank_method=rerank_method)
 chatbot = CustomerSupportChatbot(rag_system=rag_system)
+
+# Initialize the evaluator
+evaluator = ResponseEvaluator(api_key=os.getenv("OPENAI_API_KEY"))
 
 # Store chat sessions in memory (in production, use Redis or similar)
 chat_sessions: Dict[str, list] = {}
@@ -66,6 +79,8 @@ class InteractionResponse(BaseModel):
     timestamp: str
     context_used: str
     confidence_score: int
+    evaluation: Optional[Dict[str, Any]] = None
+    reasoning: Optional[Dict[str, Any]] = None
 
 @app.get("/", response_class=HTMLResponse)
 async def home(request: Request):
@@ -99,12 +114,23 @@ async def process_query(
         session = chat_sessions[session_id]
         
         # Use the chatbot to process the query with session history
-        response, contexts, confidence_scores = chatbot.process_query(query)
+        response, reasoning, contexts, confidence_scores = chatbot.process_query(query)
         
         # Update session history
         session.history.append({"role": "user", "content": query})
         session.history.append({"role": "assistant", "content": response})
         session.last_activity = datetime.utcnow()
+        
+        # Generate reasoning for evaluation
+        # reasoning = f"Response generated based on {len(contexts)} similar customer support conversations."
+        
+        # Evaluate the response
+        evaluation = await evaluator.evaluate_response(
+            question=query,
+            response=response,
+            context=contexts,
+            reasoning=reasoning
+        )
         
         # Store in database
         db_interaction = CustomerInteraction(
@@ -112,7 +138,9 @@ async def process_query(
             query=query,
             response=response,
             context_used=json.dumps(contexts),
-            confidence_score=confidence_scores[0] if confidence_scores else 0
+            confidence_score=confidence_scores[0] if confidence_scores else 0,
+            evaluation=json.dumps(evaluation) if evaluation else None,
+            reasoning=json.dumps(reasoning) if reasoning else None
         )
         db.add(db_interaction)
         db.commit()
@@ -120,14 +148,16 @@ async def process_query(
         logger.info(f"Successfully processed query for session {session_id}")
         logger.debug(f"Query: {query}, Response: {response}, Confidence: {confidence_scores}")
         
-        response = {
+        response_data = {
             "response": response,
             "contexts": contexts,
-            "confidence_scores": confidence_scores
+            "confidence_scores": confidence_scores,
+            "evaluation": evaluation,
+            "reasoning": reasoning
         }
         
         # Set cookie in response
-        response_obj = JSONResponse(content=response)
+        response_obj = JSONResponse(content=response_data)
         response_obj.set_cookie(key="session_id", value=session_id)
         return response_obj
         
@@ -140,21 +170,30 @@ async def get_interactions(limit: int = 10, db: Session = Depends(get_db)):
     """
     Get the last N interactions from the database
     """
-    interactions = db.query(CustomerInteraction).order_by(
-        CustomerInteraction.timestamp.desc()
-    ).limit(limit).all()
-    
-    return [
-        InteractionResponse(
-            id=interaction.id,
-            query=interaction.query,
-            response=interaction.response,
-            timestamp=interaction.timestamp.isoformat(),
-            context_used=interaction.context_used,
-            confidence_score=interaction.confidence_score
-        )
-        for interaction in interactions
-    ]
+    try:
+        interactions = db.query(CustomerInteraction).order_by(
+            CustomerInteraction.timestamp.desc()
+        ).limit(limit).all()
+        
+        return [
+            InteractionResponse(
+                id=interaction.id,
+                query=interaction.query,
+                response=interaction.response,
+                timestamp=interaction.timestamp.isoformat(),
+                context_used=interaction.context_used,
+                confidence_score=interaction.confidence_score,
+                evaluation=json.loads(interaction.evaluation) if interaction.evaluation else None,
+                reasoning=json.loads(interaction.reasoning) if interaction.reasoning else None
+            )
+            for interaction in interactions
+        ]
+    except json.JSONDecodeError as e:
+        logger.error(f"Error decoding JSON from database: {str(e)}")
+        raise HTTPException(status_code=500, detail="Error processing database records")
+    except Exception as e:
+        logger.error(f"Error retrieving interactions: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @app.get("/health")
 async def health_check():

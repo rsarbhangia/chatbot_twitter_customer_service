@@ -1,4 +1,4 @@
-from sqlalchemy import create_engine, Column, Integer, String, Text, DateTime
+from sqlalchemy import create_engine, Column, Integer, String, Text, DateTime, inspect
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 from datetime import datetime
@@ -22,13 +22,24 @@ class CustomerInteraction(Base):
     __tablename__ = "customer_interactions"
 
     id = Column(Integer, primary_key=True, index=True)
+    session_id = Column(String, index=True)
     query = Column(Text)
     response = Column(Text)
     timestamp = Column(DateTime, default=datetime.utcnow)
     context_used = Column(Text)
     confidence_score = Column(Integer)
 
-Base.metadata.create_all(bind=engine)
+# Check if tables exist before creating them
+def init_db():
+    inspector = inspect(engine)
+    if not inspector.has_table("customer_interactions"):
+        Base.metadata.create_all(bind=engine)
+        print("Created customer_interactions table")
+    else:
+        print("Table customer_interactions already exists")
+
+# Initialize database
+init_db()
 
 def get_db():
     db = SessionLocal()

@@ -170,6 +170,11 @@
                         class="bg-[#4CAF50] text-white px-6 py-3 rounded-lg hover:bg-[#45a049] transition-colors">
                     Send
                 </button>
+                <button type="button" 
+                        id="clearBtn"
+                        class="bg-[#f44336] text-white px-6 py-3 rounded-lg hover:bg-[#d32f2f] transition-colors">
+                    Clear
+                </button>
             </form>
         </div>
 
@@ -200,9 +205,35 @@
         const closeHistory = document.getElementById('closeHistory');
         const historyContent = document.getElementById('historyContent');
         const contextsContent = document.getElementById('contextsContent');
+        const clearBtn = document.getElementById('clearBtn');
 
         let currentContexts = [];
         let currentConfidenceScores = [];
+
+        // Clear conversation
+        clearBtn.addEventListener('click', () => {
+            // Keep only the initial greeting message
+            const initialMessage = chatMessages.querySelector('.assistant-message');
+            chatMessages.innerHTML = '';
+            if (initialMessage) {
+                chatMessages.appendChild(initialMessage);
+            } else {
+                // If no initial message exists, add one
+                const welcomeMessage = document.createElement('div');
+                welcomeMessage.className = 'assistant-message message';
+                welcomeMessage.textContent = 'Hello! I\'m your AI customer support assistant. How can I help you today?';
+                chatMessages.appendChild(welcomeMessage);
+            }
+            
+            // Clear contexts
+            currentContexts = [];
+            currentConfidenceScores = [];
+            contextsBtn.classList.remove('active');
+            contextsPanel.classList.remove('active');
+            
+            // Scroll to top
+            chatMessages.scrollTop = 0;
+        });
 
         // Panel controls
         historyBtn.addEventListener('click', () => {

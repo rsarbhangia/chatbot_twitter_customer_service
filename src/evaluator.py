@@ -14,41 +14,41 @@ class ResponseEvaluator:
         )
         
         self.evaluation_prompt = ChatPromptTemplate.from_template("""
-You are an expert evaluator of customer support responses. Analyze the following customer support interaction and provide a detailed evaluation.
+        You are an expert evaluator of customer support responses. Analyze the following customer support interaction and provide a detailed evaluation.
 
-User Question: {question}
+        User Question: {question}
 
-AI Response: {response}
+        AI Response: {response}
 
-Context Used: {context}
+        Context Used: {context}
 
-AI's Reasoning: {reasoning}
+        AI's Reasoning: {reasoning}
 
-Evaluate the response based on the following criteria and provide a score from 0-10 for each:
+        Evaluate the response based on the following criteria and provide a score from 0-10 for each:
 
-1. Relevance: How well does the response address the user's specific question?
-2. Correctness: Is the information provided accurate and consistent with the context?
-3. Completeness: Does the response fully address all aspects of the question?
-4. Clarity: Is the response clear, well-structured, and easy to understand?
-5. Empathy: Does the response show appropriate empathy and professional tone?
-6. Context Usage: How effectively were the similar support conversations utilized?
+        1. Relevance: How well does the response address the user's specific question?
+        2. Correctness: Is the information provided accurate and consistent with the context?
+        3. Completeness: Does the response fully address all aspects of the question?
+        4. Clarity: Is the response clear, well-structured, and easy to understand?
+        5. Empathy: Does the response show appropriate empathy and professional tone?
+        6. Context Usage: How effectively were the similar support conversations utilized?
 
-Provide your evaluation in the following JSON format:
-{
-    "scores": {
-        "relevance": score,
-        "correctness": score,
-        "completeness": score,
-        "clarity": score,
-        "empathy": score,
-        "context_usage": score
-    },
-    "average_score": average,
-    "strengths": ["strength1", "strength2"],
-    "weaknesses": ["weakness1", "weakness2"],
-    "improvement_suggestions": ["suggestion1", "suggestion2"]
-}
-""")
+        Provide your evaluation in the following JSON format:
+        {
+            "scores": {
+                "relevance": score,
+                "correctness": score,
+                "completeness": score,
+                "clarity": score,
+                "empathy": score,
+                "context_usage": score
+            },
+            "average_score": average,
+            "strengths": ["strength1", "strength2"],
+            "weaknesses": ["weakness1", "weakness2"],
+            "improvement_suggestions": ["suggestion1", "suggestion2"]
+        }
+        """)
 
     async def evaluate_response(
         self,

@@ -1,0 +1,16 @@
+services:
+  web:
+    build: .
+    ports:
+      - "8000:8000"
+    # image: mangal_project_image
+    volumes:
+      - ./cache:/app/cache
+      - ./src/database:/app/database
+      - ./static:/app/static
+      - ./templates:/app/templates
+      - ./logs:/app/logs
+    env_file:
+      - /src/.env
+    environment:
+      - PORT=8000

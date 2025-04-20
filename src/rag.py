@@ -1,4 +1,3 @@
-from datasets import load_dataset
 from sentence_transformers import SentenceTransformer
 import faiss
 import numpy as np
@@ -6,9 +5,13 @@ import pandas as pd
 from typing import List, Tuple, Dict, Any
 import pickle
 from pathlib import Path
+from logger_config import setup_logger
+
+logger = setup_logger(__name__)
 
 class RAGSystem:
     def __init__(self):
+        logger.info("Initializing RAG System")
         self.model = SentenceTransformer('all-MiniLM-L6-v2')
         self.index = None
         self.input_texts = []
@@ -24,26 +27,27 @@ class RAGSystem:
         self.index_cache_path = self.cache_dir / "faiss_index.bin"
         
         self._prepare_index()
+        logger.debug("RAG System initialized successfully")
 
     def _prepare_index(self):
         """Prepare the FAISS index with the customer support tweets dataset"""
-        print("Preparing the index with customer support tweets dataset...")
+        logger.info("Preparing the index with customer support tweets dataset...")
         
         # Check if we have cached data
         if self._load_cached_data():
-            print("Using cached dataset and embeddings.")
+            logger.info("Using cached dataset and embeddings.")
             return
             
         try:
             # Load the dataset using the Hugging Face datasets API
-            print("Loading dataset from Hugging Face...")
+            logger.info("Loading dataset from Hugging Face...")
 
             df = pd.read_json("hf://datasets/MohammadOthman/mo-customer-support-tweets-945k/preprocessed_data.json")
-            print(f"Dataset loaded and converted to DataFrame with {len(df)} rows")
+            logger.info(f"Dataset loaded and converted to DataFrame with {len(df)} rows")
             
             # Extract text from the DataFrame
             # Check what columns are available
-            print(f"Available columns: {df.columns.tolist()}")
+            logger.info(f"Available columns: {df.columns.tolist()}")
             
             # Try to find input and output columns
             input_column = None
@@ -52,7 +56,7 @@ class RAGSystem:
             input_column, output_column = "input", "output"
             
             if input_column and output_column:
-                print(f"Using '{input_column}' as input column and '{output_column}' as output column")
+                logger.info(f"Using '{input_column}' as input column and '{output_column}' as output column")
                 # Store both input and output texts
                 self.input_texts = df[input_column].tolist()[:10000]  # Using first 10k examples
                 self.output_texts = df[output_column].tolist()[:10000]
@@ -65,7 +69,7 @@ class RAGSystem:
             else:
                 raise ValueError("Both input and output columns must exist in the dataset")
             
-            print(f"Loaded {len(self.combined_texts)} conversation pairs from the dataset")
+            logger.info(f"Loaded {len(self.combined_texts)} conversation pairs from the dataset")
             
             if len(self.combined_texts) == 0:
                 raise ValueError("No conversation pairs loaded from dataset")
@@ -74,52 +78,52 @@ class RAGSystem:
             self._cache_dataset()
             
             # Create embeddings for combined input-output pairs
-            print("Creating embeddings for combined input-output pairs...")
+            logger.info("Creating embeddings for combined input-output pairs...")
             embeddings = self.model.encode(self.combined_texts, show_progress_bar=True)
-            print(f"Embeddings shape: {embeddings.shape}")
+            logger.info(f"Embeddings shape: {embeddings.shape}")
             
             # Cache the embeddings
             self._cache_embeddings(embeddings)
             
             # Create FAISS index with combined texts
             dimension = embeddings.shape[1]
-            print(f"Creating FAISS index with dimension {dimension}")
+            logger.info(f"Creating FAISS index with dimension {dimension}")
             self.index = faiss.IndexFlatL2(dimension)
             self.index.add(np.array(embeddings).astype('float32'))
             
             # Cache the FAISS index
             self._cache_index()
             
-            print("Customer support tweets index preparation completed!")
+            logger.info("Customer support tweets index preparation completed!")
             
         except Exception as e:
-            print(f"Error loading dataset: {str(e)}")
-            print("Please download the dataset.")
+            logger.error(f"Error loading dataset: {str(e)}")
+            logger.info("Please download the dataset.")
             
             raise ValueError("Failed to prepare index. Please ensure the dataset is accessible and properly formatted.")
 
     def _cache_dataset(self):
         """Cache the dataset to disk"""
-        print(f"Caching dataset to {self.dataset_cache_path}")
+        logger.info(f"Caching dataset to {self.dataset_cache_path}")
         with open(self.dataset_cache_path, 'wb') as f:
             pickle.dump({
                 'input_texts': self.input_texts,
                 'output_texts': self.output_texts,
                 'combined_texts': self.combined_texts
             }, f)
-        print("Dataset cached successfully")
+        logger.info("Dataset cached successfully")
 
     def _cache_embeddings(self, embeddings):
         """Cache the embeddings to disk"""
-        print(f"Caching embeddings to {self.embeddings_cache_path}")
+        logger.info(f"Caching embeddings to {self.embeddings_cache_path}")
         np.save(self.embeddings_cache_path, embeddings)
-        print("Embeddings cached successfully")
+        logger.info("Embeddings cached successfully")
 
     def _cache_index(self):
         """Cache the FAISS index to disk"""
-        print(f"Caching FAISS index to {self.index_cache_path}")
+        logger.info(f"Caching FAISS index to {self.index_cache_path}")
         faiss.write_index(self.index, str(self.index_cache_path))
-        print("FAISS index cached successfully")
+        logger.info("FAISS index cached successfully")
 
     def _load_cached_data(self):
         """Load cached data if available"""
@@ -127,12 +131,12 @@ class RAGSystem:
         if not (self.dataset_cache_path.exists() and 
                 self.embeddings_cache_path.exists() and 
                 self.index_cache_path.exists()):
-            print("Cache files not found. Will download and process data.")
+            logger.info("Cache files not found. Will download and process data.")
             return False
         
         try:
             # Load dataset
-            print(f"Loading cached dataset from {self.dataset_cache_path}")
+            logger.info(f"Loading cached dataset from {self.dataset_cache_path}")
             with open(self.dataset_cache_path, 'rb') as f:
                 data = pickle.load(f)
                 self.input_texts = data['input_texts']
@@ -140,42 +144,42 @@ class RAGSystem:
                 self.combined_texts = data['combined_texts']
             
             # Load embeddings
-            print(f"Loading cached embeddings from {self.embeddings_cache_path}")
+            logger.info(f"Loading cached embeddings from {self.embeddings_cache_path}")
             embeddings = np.load(self.embeddings_cache_path)
             
             # Load FAISS index
-            print(f"Loading cached FAISS index from {self.index_cache_path}")
+            logger.info(f"Loading cached FAISS index from {self.index_cache_path}")
             self.index = faiss.read_index(str(self.index_cache_path))
             
-            print("Successfully loaded all cached data")
+            logger.info("Successfully loaded all cached data")
             return True
         except Exception as e:
-            print(f"Error loading cached data: {str(e)}")
-            print("Will download and process data instead.")
+            logger.error(f"Error loading cached data: {str(e)}")
+            logger.info("Will download and process data instead.")
             return False
 
     def retrieve(self, query: str, k: int = 3) -> List[Dict[str, Any]]:
         """Retrieve relevant contexts using combined input-output pairs"""
-        print(f"Retrieving contexts for query: {query}")
+        logger.debug(f"Retrieving contexts for query: {query}")
         
         # If we have chat history, enhance the query with recent context
         enhanced_query = self._enhance_query_with_history(query)
-        print(f"Enhanced query: {enhanced_query}")
+        logger.debug(f"Enhanced query: {enhanced_query}")
         
         # Get query vector
         query_vector = self.model.encode([enhanced_query])
-        print(f"Query vector shape: {query_vector.shape}")
+        logger.debug(f"Query vector shape: {query_vector.shape}")
         
         if self.index is None:
-            print("Warning: Index is None, returning empty results")
+            logger.warning("Warning: Index is None, returning empty results")
             return []
         
         # Retrieve using combined input-output pairs
         distances, indices = self.index.search(
             np.array(query_vector).astype('float32'), k
         )
-        print(f"Distances: {distances}")
-        print(f"Indices: {indices}")
+        logger.debug(f"Distances: {distances}")
+        logger.debug(f"Indices: {indices}")
         
         results = []
         for idx, distance in zip(indices[0], distances[0]):
@@ -188,7 +192,7 @@ class RAGSystem:
                     'distance': float(distance)
                 })
         
-        print(f"Retrieved {len(results)} results")
+        logger.debug(f"Retrieved {len(results)} results")
         return results
     
     def _enhance_query_with_history(self, query: str, max_history: int = 3) -> str:

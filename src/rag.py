@@ -86,8 +86,8 @@ class RAGSystem:
             if input_column and output_column:
                 logger.info(f"Using '{input_column}' as input column and '{output_column}' as output column")
                 # Store both input and output texts
-                self.input_texts = df[input_column].tolist() #[:10000]  # Using first 10k examples
-                self.output_texts = df[output_column].tolist() #[:10000]
+                self.input_texts = df[input_column].tolist()[:100000]  # Using first 10k examples
+                self.output_texts = df[output_column].tolist()[:100000]
                 
                 # Create combined input-output pairs for better context
                 self.combined_texts = [

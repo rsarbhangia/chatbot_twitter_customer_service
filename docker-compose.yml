@@ -10,7 +10,6 @@ services:
       - ./static:/app/static
       - ./templates:/app/templates
       - ./logs:/app/logs
-    env_file:
-      - /src/.env
+      - ./tmp:/app/tmp
     environment:
       - PORT=8000

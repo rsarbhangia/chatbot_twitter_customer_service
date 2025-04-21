@@ -15,7 +15,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY . .
 
 # Create necessary directories
-RUN mkdir -p cache database static templates
+RUN mkdir -p cache database static templates tmp
 
 # Set environment variables
 ENV PORT=8000

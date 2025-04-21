@@ -96,7 +96,7 @@ class R2StorageStrategy(StorageStrategy):
             # Upload to R2 with proper file extension
             self.client.put_object(
                 Bucket=self.bucket_name,
-                Key=f"{key}{file_extension}",
+                Key=f"archive/{key}{file_extension}",
                 Body=file_data
             )
             logger.info(f"Successfully saved {file_type} file to R2")
@@ -119,7 +119,7 @@ class R2StorageStrategy(StorageStrategy):
             # Download from R2 with proper file extension
             response = self.client.get_object(
                 Bucket=self.bucket_name,
-                Key=f"{key}{file_extension}"
+                Key=f"archive/{key}{file_extension}"
             )
             file_data = response['Body'].read()
             

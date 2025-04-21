@@ -13,3 +13,4 @@ logs/
 *.pyz
 *.pywz
 *.pywz
+tmp/

@@ -6,11 +6,13 @@ from typing import List, Tuple, Dict, Any, Optional
 import pickle
 from pathlib import Path
 from logger_config import setup_logger
+from storage import StorageFactory
+import os
 
 logger = setup_logger(__name__)
 
 class RAGSystem:
-    def __init__(self, search_method: str = "knn", rerank_method: Optional[str] = None):
+    def __init__(self, search_method: str = "knn", rerank_method: Optional[str] = None, storage_type: str = "local"):
         """
         Initialize RAG System
         
@@ -23,6 +25,9 @@ class RAGSystem:
                 - "cross_encoder": Use Cross-Encoder for reranking
                 - "context_aware": Use context-aware reranking
                 - "both": Use both Cross-Encoder and context-aware reranking
+            storage_type: The storage type to use. Options are:
+                - "local": Store cache locally (default)
+                - "r2": Store cache in Cloudflare R2 bucket
         """
         logger.info("Initializing RAG System")
         self.model = SentenceTransformer('all-MiniLM-L6-v2')
@@ -47,12 +52,18 @@ class RAGSystem:
             logger.info("Initializing Cross-Encoder model for reranking")
             self.cross_encoder = CrossEncoder('cross-encoder/ms-marco-MiniLM-L-6-v2')
         
-        # Define cache paths
-        self.cache_dir = Path("../cache")
-        self.cache_dir.mkdir(exist_ok=True)
-        self.dataset_cache_path = self.cache_dir / "customer_support_dataset.pkl"
-        self.embeddings_cache_path = self.cache_dir / "embeddings.npy"
-        self.index_cache_path = self.cache_dir / "faiss_index.bin"
+        # Initialize storage strategy
+        try:
+            self.storage = StorageFactory.create_storage(storage_type)
+            logger.info(f"Using {storage_type} storage strategy")
+        except Exception as e:
+            logger.error(f"Failed to initialize {storage_type} storage: {str(e)}. Falling back to local storage.")
+            self.storage = StorageFactory.create_storage("local")
+        
+        # Define cache keys (not paths anymore since we're using storage strategy)
+        self.dataset_cache_key = "customer_support_dataset"
+        self.embeddings_cache_key = "embeddings"
+        self.index_cache_key = "faiss_index"
         
         self._prepare_index()
         logger.debug("RAG System initialized successfully")
@@ -86,8 +97,8 @@ class RAGSystem:
             if input_column and output_column:
                 logger.info(f"Using '{input_column}' as input column and '{output_column}' as output column")
                 # Store both input and output texts
-                self.input_texts = df[input_column].tolist()[:100000]  # Using first 10k examples
-                self.output_texts = df[output_column].tolist()[:100000]
+                self.input_texts = df[input_column].tolist()[:1000]  # Using first 10k examples
+                self.output_texts = df[output_column].tolist()[:1000]
                 
                 # Create combined input-output pairs for better context
                 self.combined_texts = [
@@ -152,59 +163,70 @@ class RAGSystem:
             raise ValueError("Failed to prepare index. Please ensure the dataset is accessible and properly formatted.")
 
     def _cache_dataset(self):
-        """Cache the dataset to disk"""
-        logger.info(f"Caching dataset to {self.dataset_cache_path}")
-        with open(self.dataset_cache_path, 'wb') as f:
-            pickle.dump({
-                'input_texts': self.input_texts,
-                'output_texts': self.output_texts,
-                'combined_texts': self.combined_texts
-            }, f)
-        logger.info("Dataset cached successfully")
+        """Cache the dataset using the storage strategy"""
+        logger.info("Caching dataset")
+        data = {
+            'input_texts': self.input_texts,
+            'output_texts': self.output_texts,
+            'combined_texts': self.combined_texts
+        }
+        success = self.storage.save_file(self.dataset_cache_key, data, "dataset")
+        if success:
+            logger.info("Dataset cached successfully")
+        else:
+            logger.error("Failed to cache dataset")
 
     def _cache_embeddings(self, embeddings):
-        """Cache the embeddings to disk"""
-        logger.info(f"Caching embeddings to {self.embeddings_cache_path}")
-        np.save(self.embeddings_cache_path, embeddings)
-        logger.info("Embeddings cached successfully")
+        """Cache the embeddings using the storage strategy"""
+        logger.info("Caching embeddings")
+        success = self.storage.save_file(self.embeddings_cache_key, embeddings, "embeddings")
+        if success:
+            logger.info("Embeddings cached successfully")
+        else:
+            logger.error("Failed to cache embeddings")
 
     def _cache_index(self):
-        """Cache the FAISS index to disk"""
-        logger.info(f"Caching FAISS index to {self.index_cache_path}")
-        faiss.write_index(self.index, str(self.index_cache_path))
-        logger.info("FAISS index cached successfully")
+        """Cache the FAISS index using the storage strategy"""
+        logger.info("Caching FAISS index")
+        success = self.storage.save_file(self.index_cache_key, self.index, "index")
+        if success:
+            logger.info("FAISS index cached successfully")
+        else:
+            logger.error("Failed to cache FAISS index")
 
     def _load_cached_data(self):
-        """Load cached data if available"""
-        # Check if all cache files exist
-        if not (self.dataset_cache_path.exists() and 
-                self.embeddings_cache_path.exists() and 
-                self.index_cache_path.exists()):
-            logger.info("Cache files not found. Will download and process data.")
-            return False
-        
+        """Load cached data using the storage strategy"""
         try:
             # Load dataset
-            logger.info(f"Loading cached dataset from {self.dataset_cache_path}")
-            with open(self.dataset_cache_path, 'rb') as f:
-                data = pickle.load(f)
-                self.input_texts = data['input_texts']
-                self.output_texts = data['output_texts']
-                self.combined_texts = data['combined_texts']
+            logger.info("Loading cached dataset")
+            data = self.storage.load_file(self.dataset_cache_key, "dataset")
+            if data is None:
+                logger.info("No cached dataset found")
+                return False
+                
+            self.input_texts = data['input_texts']
+            self.output_texts = data['output_texts']
+            self.combined_texts = data['combined_texts']
             
             # Load embeddings
-            logger.info(f"Loading cached embeddings from {self.embeddings_cache_path}")
-            embeddings = np.load(self.embeddings_cache_path)
+            logger.info("Loading cached embeddings")
+            embeddings = self.storage.load_file(self.embeddings_cache_key, "embeddings")
+            if embeddings is None:
+                logger.info("No cached embeddings found")
+                return False
             
             # Load FAISS index
-            logger.info(f"Loading cached FAISS index from {self.index_cache_path}")
-            self.index = faiss.read_index(str(self.index_cache_path))
+            logger.info("Loading cached FAISS index")
+            self.index = self.storage.load_file(self.index_cache_key, "index")
+            if self.index is None:
+                logger.info("No cached FAISS index found")
+                return False
             
             logger.info("Successfully loaded all cached data")
             return True
+            
         except Exception as e:
             logger.error(f"Error loading cached data: {str(e)}")
-            logger.info("Will download and process data instead.")
             return False
 
     def _rerank_with_cross_encoder(self, query: str, results: List[Dict[str, Any]]) -> List[Dict[str, Any]]:

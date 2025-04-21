@@ -50,7 +50,11 @@ logger.info(f"Using search method: {search_method}")
 rerank_method = os.getenv("RERANK_METHOD", None)
 logger.info(f"Using rerank method: {rerank_method}")
 
-rag_system = RAGSystem(search_method=search_method, rerank_method=rerank_method)
+# Get the storage type from environment variables, default to "local"
+storage_type = os.getenv("STORAGE_TYPE", "local")
+logger.info(f"Using storage type: {storage_type}")
+
+rag_system = RAGSystem(search_method=search_method, rerank_method=rerank_method, storage_type=storage_type)
 chatbot = CustomerSupportChatbot(rag_system=rag_system)
 
 # Initialize the evaluator

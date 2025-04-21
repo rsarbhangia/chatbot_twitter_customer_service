@@ -6,11 +6,13 @@ from typing import List, Tuple, Dict, Any, Optional
 import pickle
 from pathlib import Path
 from logger_config import setup_logger
+from storage import Storage
+import io
 
 logger = setup_logger(__name__)
 
 class RAGSystem:
-    def __init__(self, search_method: str = "knn", rerank_method: Optional[str] = None):
+    def __init__(self, search_method: str = "knn", rerank_method: Optional[str] = None, use_r2: bool = False):
         """
         Initialize RAG System
         
@@ -23,6 +25,7 @@ class RAGSystem:
                 - "cross_encoder": Use Cross-Encoder for reranking
                 - "context_aware": Use context-aware reranking
                 - "both": Use both Cross-Encoder and context-aware reranking
+            use_r2: Whether to use R2 storage (default: False)
         """
         logger.info("Initializing RAG System")
         self.model = SentenceTransformer('all-MiniLM-L6-v2')
@@ -31,6 +34,10 @@ class RAGSystem:
         self.output_texts = []
         self.combined_texts = []  # Store combined input-output pairs
         self.chat_history = []  # Store chat history as (query, response) pairs
+        self.use_r2 = use_r2
+        
+        # Initialize storage
+        self.storage = Storage(use_r2=use_r2)
         
         # Validate search method
         if search_method not in ["knn", "ann"]:
@@ -47,22 +54,21 @@ class RAGSystem:
             logger.info("Initializing Cross-Encoder model for reranking")
             self.cross_encoder = CrossEncoder('cross-encoder/ms-marco-MiniLM-L-6-v2')
         
-        # Define cache paths
-        self.cache_dir = Path("../cache")
-        self.cache_dir.mkdir(exist_ok=True)
-        self.dataset_cache_path = self.cache_dir / "customer_support_dataset.pkl"
-        self.embeddings_cache_path = self.cache_dir / "embeddings.npy"
-        self.index_cache_path = self.cache_dir / "faiss_index.bin"
-        
-        self._prepare_index()
+        # Note: _prepare_index is now called separately via initialize()
         logger.debug("RAG System initialized successfully")
 
-    def _prepare_index(self):
+    async def initialize(self):
+        """Initialize the RAG system by preparing the index"""
+        logger.info("Initializing RAG system index...")
+        await self._prepare_index()
+        logger.info("RAG system index initialization complete")
+
+    async def _prepare_index(self):
         """Prepare the FAISS index with the customer support tweets dataset"""
         logger.info("Preparing the index with customer support tweets dataset...")
         
-        # Check if we have cached data
-        if self._load_cached_data():
+        # Try to load cached data first
+        if await self._load_cached_data():
             logger.info("Using cached dataset and embeddings.")
             return
             
@@ -74,20 +80,13 @@ class RAGSystem:
             logger.info(f"Dataset loaded and converted to DataFrame with {len(df)} rows")
             
             # Extract text from the DataFrame
-            # Check what columns are available
-            logger.info(f"Available columns: {df.columns.tolist()}")
-            
-            # Try to find input and output columns
-            input_column = None
-            output_column = None
-            
             input_column, output_column = "input", "output"
             
             if input_column and output_column:
                 logger.info(f"Using '{input_column}' as input column and '{output_column}' as output column")
                 # Store both input and output texts
-                self.input_texts = df[input_column].tolist()[:100000]  # Using first 10k examples
-                self.output_texts = df[output_column].tolist()[:100000]
+                self.input_texts = df[input_column].tolist()[:1000]  # Using first 10k examples
+                self.output_texts = df[output_column].tolist()[:1000]
                 
                 # Create combined input-output pairs for better context
                 self.combined_texts = [
@@ -102,25 +101,19 @@ class RAGSystem:
             if len(self.combined_texts) == 0:
                 raise ValueError("No conversation pairs loaded from dataset")
             
-            # Cache the dataset
-            self._cache_dataset()
-            
             # Create embeddings for combined input-output pairs
             logger.info("Creating embeddings for combined input-output pairs...")
-            embeddings = self.model.encode(self.combined_texts, show_progress_bar=True)
-            logger.info(f"Embeddings shape: {embeddings.shape}")
-            
-            # Cache the embeddings
-            self._cache_embeddings(embeddings)
+            self.embeddings = self.model.encode(self.combined_texts, show_progress_bar=True)
+            logger.info(f"Embeddings shape: {self.embeddings.shape}")
             
             # Create FAISS index with combined texts
-            dimension = embeddings.shape[1]
+            dimension = self.embeddings.shape[1]
             logger.info(f"Creating FAISS index with dimension {dimension}")
             
             if self.search_method == "knn":
                 logger.info("Using KNN (exact) search with IndexFlatL2")
                 self.index = faiss.IndexFlatL2(dimension)
-                self.index.add(np.array(embeddings).astype('float32'))
+                self.index.add(np.array(self.embeddings).astype('float32'))
             else:  # ann
                 logger.info("Using ANN (approximate) search with IndexIVFFlat")
                 # Create a quantizer for the index
@@ -132,80 +125,23 @@ class RAGSystem:
                 
                 # Train the index
                 logger.info("Training the IVF index...")
-                self.index.train(np.array(embeddings).astype('float32'))
+                self.index.train(np.array(self.embeddings).astype('float32'))
                 
                 # Add vectors to the index
-                self.index.add(np.array(embeddings).astype('float32'))
+                self.index.add(np.array(self.embeddings).astype('float32'))
                 
                 # Set search parameters
                 self.index.nprobe = 10  # number of clusters to visit during search
             
-            # Cache the FAISS index
-            self._cache_index()
+            # Cache all the data
+            await self._cache_all_data(self.embeddings)
             
             logger.info("Customer support tweets index preparation completed!")
             
         except Exception as e:
             logger.error(f"Error loading dataset: {str(e)}")
             logger.info("Please download the dataset.")
-            
             raise ValueError("Failed to prepare index. Please ensure the dataset is accessible and properly formatted.")
-
-    def _cache_dataset(self):
-        """Cache the dataset to disk"""
-        logger.info(f"Caching dataset to {self.dataset_cache_path}")
-        with open(self.dataset_cache_path, 'wb') as f:
-            pickle.dump({
-                'input_texts': self.input_texts,
-                'output_texts': self.output_texts,
-                'combined_texts': self.combined_texts
-            }, f)
-        logger.info("Dataset cached successfully")
-
-    def _cache_embeddings(self, embeddings):
-        """Cache the embeddings to disk"""
-        logger.info(f"Caching embeddings to {self.embeddings_cache_path}")
-        np.save(self.embeddings_cache_path, embeddings)
-        logger.info("Embeddings cached successfully")
-
-    def _cache_index(self):
-        """Cache the FAISS index to disk"""
-        logger.info(f"Caching FAISS index to {self.index_cache_path}")
-        faiss.write_index(self.index, str(self.index_cache_path))
-        logger.info("FAISS index cached successfully")
-
-    def _load_cached_data(self):
-        """Load cached data if available"""
-        # Check if all cache files exist
-        if not (self.dataset_cache_path.exists() and 
-                self.embeddings_cache_path.exists() and 
-                self.index_cache_path.exists()):
-            logger.info("Cache files not found. Will download and process data.")
-            return False
-        
-        try:
-            # Load dataset
-            logger.info(f"Loading cached dataset from {self.dataset_cache_path}")
-            with open(self.dataset_cache_path, 'rb') as f:
-                data = pickle.load(f)
-                self.input_texts = data['input_texts']
-                self.output_texts = data['output_texts']
-                self.combined_texts = data['combined_texts']
-            
-            # Load embeddings
-            logger.info(f"Loading cached embeddings from {self.embeddings_cache_path}")
-            embeddings = np.load(self.embeddings_cache_path)
-            
-            # Load FAISS index
-            logger.info(f"Loading cached FAISS index from {self.index_cache_path}")
-            self.index = faiss.read_index(str(self.index_cache_path))
-            
-            logger.info("Successfully loaded all cached data")
-            return True
-        except Exception as e:
-            logger.error(f"Error loading cached data: {str(e)}")
-            logger.info("Will download and process data instead.")
-            return False
 
     def _rerank_with_cross_encoder(self, query: str, results: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """Rerank results using Cross-Encoder model"""
@@ -443,4 +379,186 @@ class RAGSystem:
         # Update chat history with the current query and response
         self.chat_history.append((query, response))
         
-        return response, contexts, confidence_scores 
+        return response, contexts, confidence_scores
+
+    async def get_cached_response(self, query: str):
+        cache_key = self.generate_cache_key(query)
+        return await self.storage.get_cache(cache_key)
+
+    async def cache_response(self, query: str, response: dict):
+        cache_key = self.generate_cache_key(query)
+        await self.storage.save_cache(cache_key, response)
+
+    def generate_cache_key(self, query: str):
+        # Implement the logic to generate a cache key based on the query
+        # This is a placeholder and should be replaced with the actual implementation
+        return query
+
+    async def _save_dataset(self):
+        """Save dataset to storage"""
+        logger.info("Saving dataset...")
+        dataset_file_name = "customer_support_dataset.pkl"
+        data = {
+            'input_texts': self.input_texts,
+            'output_texts': self.output_texts,
+            'combined_texts': self.combined_texts
+        }
+        try:
+            # Serialize the data
+            serialized_data = pickle.dumps(data)
+            # Use the Storage class to save the data
+            await self.storage.save_cache(dataset_file_name, {'data': serialized_data.hex()})
+            logger.info("Dataset saved successfully")
+            return True
+        except Exception as e:
+            logger.error(f"Error saving dataset: {e}")
+            return False
+
+    async def _load_dataset(self):
+        """Load dataset from storage"""
+        logger.info("Loading dataset...")
+        dataset_file_name = "customer_support_dataset.pkl"
+        try:
+            # Use the Storage class to get the data
+            cached_data = await self.storage.get_cache(dataset_file_name)
+            if not cached_data:
+                logger.warning("No dataset found in cache")
+                return False
+                
+            # Deserialize the data
+            serialized_data = bytes.fromhex(cached_data['data'])
+            data = pickle.loads(serialized_data)
+            
+            self.input_texts = data['input_texts']
+            self.output_texts = data['output_texts']
+            self.combined_texts = data['combined_texts']
+            logger.info("Dataset loaded successfully")
+            return True
+        except Exception as e:
+            logger.error(f"Error loading dataset: {e}")
+            return False
+
+    async def _save_embeddings(self):
+        """Save embeddings to storage"""
+        logger.info("Saving embeddings...")
+        embeddings_file_name = "embeddings.npy"
+        try:
+            # Serialize the embeddings
+            serialized_data = pickle.dumps({
+                'embeddings': self.embeddings,
+                'texts': self.combined_texts
+            })
+            
+            # Use the Storage class to save the data
+            await self.storage.save_cache(embeddings_file_name, {'data': serialized_data.hex()})
+            
+            logger.info("Embeddings saved successfully")
+            return True
+        except Exception as e:
+            logger.error(f"Error saving embeddings: {e}")
+            return False
+
+    async def _load_embeddings(self):
+        """Load embeddings from storage"""
+        logger.info("Loading embeddings...")
+        embeddings_file_name = "embeddings.npy"
+        try:
+            # Get cached data
+            cached_data = await self.storage.get_cache(embeddings_file_name)
+            if not cached_data:
+                logger.warning("No embeddings found in cache")
+                return False
+                
+            # Deserialize the data
+            data = pickle.loads(bytes.fromhex(cached_data['data']))
+            self.embeddings = data['embeddings']
+            self.combined_texts = data['texts']
+            
+            logger.info("Embeddings loaded successfully")
+            return True
+        except Exception as e:
+            logger.error(f"Error loading embeddings: {e}")
+            return False
+
+    async def _save_index(self):
+        """Save FAISS index to storage"""
+        logger.info("Saving FAISS index...")
+        index_file_name = "faiss_index.bin"
+        try:
+            # Serialize the index
+            serialized_index = pickle.dumps(self.index)
+            
+            # Convert bytes to hex string for JSON serialization
+            await self.storage.save_cache(index_file_name, {'data': serialized_index.hex()})
+            
+            logger.info("FAISS index saved successfully")
+            return True
+        except Exception as e:
+            logger.error(f"Error saving FAISS index: {e}")
+            return False
+
+    async def _load_index(self):
+        """Load FAISS index from storage"""
+        logger.info("Loading FAISS index...")
+        index_file_name = "faiss_index.bin"
+        try:
+            # Get cached data using the same file name as before
+            cached_data = await self.storage.get_cache(index_file_name)
+            if not cached_data:
+                logger.warning("No cached FAISS index found")
+                return False
+                
+            # Deserialize the index by first converting hex back to bytes
+            serialized_index = bytes.fromhex(cached_data['data'])
+            self.index = pickle.loads(serialized_index)
+            
+            logger.info("FAISS index loaded successfully")
+            return True
+        except Exception as e:
+            logger.error(f"Error loading FAISS index: {e}")
+            return False
+
+    async def _load_cached_data(self):
+        """Load all cached data"""
+        logger.info("Loading cached data...")
+        
+        # Try to load dataset
+        if not await self._load_dataset():
+            logger.info("No cached dataset found")
+            return False
+            
+        # Try to load embeddings
+        embeddings = await self._load_embeddings()
+        if embeddings is None:
+            logger.info("No cached embeddings found")
+            return False
+            
+        # Try to load index
+        if not await self._load_index():
+            logger.info("No cached index found")
+            return False
+            
+        logger.info("Successfully loaded all cached data")
+        return True
+
+    async def _cache_all_data(self, embeddings: np.ndarray):
+        """Cache all data"""
+        logger.info("Caching all data...")
+        
+        # Save dataset
+        if not await self._save_dataset():
+            logger.error("Failed to cache dataset")
+            return False
+            
+        # Save embeddings
+        if not await self._save_embeddings():
+            logger.error("Failed to cache embeddings")
+            return False
+            
+        # Save index
+        if not await self._save_index():
+            logger.error("Failed to cache index")
+            return False
+            
+        logger.info("Successfully cached all data")
+        return True 

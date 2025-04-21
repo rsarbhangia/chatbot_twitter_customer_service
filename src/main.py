@@ -28,19 +28,6 @@ logger = setup_logger(__name__)
 
 load_dotenv()
 
-app = FastAPI(title="Customer Support AI API")
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["https://chatbot-twitter-customer-service.onrender.com"],  # In production, replace with your frontend URL
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
-BASE_DIR = pathlib.Path(__file__).parent.parent
-app.mount("/static", StaticFiles(directory=str(BASE_DIR / "static")), name="static")
-templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
-
 # Initialize the RAG system and chatbot
 # Get search method from environment variables, default to "knn"
 search_method = os.getenv("SEARCH_METHOD", "knn")
@@ -58,6 +45,52 @@ evaluator = ResponseEvaluator(api_key=os.getenv("OPENAI_API_KEY"))
 
 # Store chat sessions in memory (in production, use Redis or similar)
 chat_sessions: Dict[str, list] = {}
+
+# Session cleanup function
+async def cleanup_old_sessions():
+    current_time = datetime.utcnow()
+    expired_sessions = [
+        sid for sid, session in chat_sessions.items()
+        if (current_time - session.last_activity) >= timedelta(hours=24)
+    ]
+    for sid in expired_sessions:
+        del chat_sessions[sid]
+        logger.info(f"Cleaned up expired session {sid}")
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Startup
+    logger.info("Starting up the application...")
+    
+    # Initialize the RAG system
+    await rag_system.initialize()
+    
+    # Set up scheduler for cleanup
+    scheduler = AsyncIOScheduler()
+    scheduler.add_job(cleanup_old_sessions, 'interval', minutes=30)
+    scheduler.start()
+    
+    yield
+    
+    # Shutdown
+    logger.info("Shutting down the application...")
+    scheduler.shutdown()
+
+app = FastAPI(
+    title="Customer Support AI API",
+    lifespan=lifespan
+)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["https://chatbot-twitter-customer-service.onrender.com"],  # In production, replace with your frontend URL
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+BASE_DIR = pathlib.Path(__file__).parent.parent
+app.mount("/static", StaticFiles(directory=str(BASE_DIR / "static")), name="static")
+templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
 
 class ChatSession:
     def __init__(self):
@@ -198,29 +231,6 @@ async def get_interactions(limit: int = 10, db: Session = Depends(get_db)):
 @app.get("/health")
 async def health_check():
     return {"status": "healthy"}
-
-# Initialize the scheduler
-scheduler = AsyncIOScheduler()
-
-# Session cleanup function
-async def cleanup_old_sessions():
-    current_time = datetime.utcnow()
-    expired_sessions = [
-        sid for sid, session in chat_sessions.items()
-        if (current_time - session.last_activity) >= timedelta(hours=24)
-    ]
-    for sid in expired_sessions:
-        del chat_sessions[sid]
-        logger.info(f"Cleaned up expired session {sid}")
-
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    # Startup
-    scheduler.add_job(cleanup_old_sessions, 'interval', hours=1)
-    scheduler.start()
-    yield
-    # Shutdown
-    scheduler.shutdown()
 
 if __name__ == "__main__":
     port = int(os.getenv("PORT", 8000))

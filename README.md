@@ -1,24 +1,68 @@
-# AI-Powered Customer Support Assistant
+# Customer Support AI Chatbot
 
-This is an end-to-end AI-powered customer support assistant that uses Retrieval-Augmented Generation (RAG) to provide intelligent responses to customer queries. The system uses a dataset of customer support tweets and provides a FastAPI-based API for interaction.
+A sophisticated customer support chatbot powered by FastAPI and RAG (Retrieval-Augmented Generation) technology. This application provides intelligent customer service responses by leveraging historical interactions and context-aware responses.
 
-## Features
+## 🚀 Features
 
-- Retrieval-Augmented Generation (RAG) for context-aware responses
-- FastAPI-based REST API
-- SQLite database for storing interaction history
-- Confidence scoring for responses
-- Easy-to-use API endpoints
+- **RAG-Powered Responses**: Utilizes Retrieval-Augmented Generation for contextually relevant answers
+- **Session Management**: Maintains chat history and session state
+- **Response Evaluation**: Built-in evaluation system for response quality
+- **Database Integration**: Stores interactions for analysis and improvement
+- **Configurable Search Methods**: Supports multiple search algorithms (KNN by default)
+- **Reranking Capabilities**: Optional response reranking for improved accuracy
+- **Health Monitoring**: Built-in health check endpoints
+- **Session Cleanup**: Automatic cleanup of inactive sessions
+- **CORS Support**: Configured for secure cross-origin requests
 
-## Setup
+## 🏗️ Project Structure
+
+```
+.
+├── src/
+│   ├── main.py              # FastAPI application entry point
+│   ├── database.py          # Database models and connection
+│   ├── rag.py              # RAG system implementation
+│   ├── chatbot.py          # Chatbot logic
+│   ├── evaluator.py        # Response evaluation system
+│   └── logger_config.py    # Logging configuration
+├── static/                 # Static files (CSS, JS, images)
+├── templates/             # HTML templates
+├── cache/                 # Cache directory for RAG system
+├── database/             # Database files
+├── tmp/                  # Temporary files
+├── Dockerfile           # Container configuration
+└── requirements.txt     # Python dependencies
+```
+
+## 🛠️ Prerequisites
+
+- Python 3.9+
+- Docker (for containerized deployment)
+- PostgreSQL (recommended for production)
+
+## 🔧 Environment Variables
+
+Create a `.env` file with the following variables:
+
+```env
+PORT=8000
+SEARCH_METHOD=knn
+RERANK_METHOD=None
+STORAGE_TYPE=local
+OPENAI_API_KEY=your_api_key_here
+```
+
+## 🚀 Getting Started
+
+### Local Development
 
 1. Clone the repository:
 ```bash
 git clone <repository-url>
-cd customer-support-ai
+cd <repository-name>
 ```
 
-2. Create a virtual environment and activate it:
+2. Create and activate a virtual environment:
 ```bash
 python -m venv venv
 source venv/bin/activate  # On Windows: venv\Scripts\activate
@@ -29,65 +73,78 @@ source venv/bin/activate  # On Windows: venv\Scripts\activate
 pip install -r requirements.txt
 ```
 
-## Running the Application
-
-1. Start the FastAPI server:
+4. Run the application:
 ```bash
-uvicorn src.main:app --reload
+cd src
+python main.py
 ```
 
-2. The API will be available at `http://localhost:8000`
+### Docker Deployment
 
-## API Endpoints
-
-### 1. Submit a Query
-- **Endpoint**: `/query`
-- **Method**: POST
-- **Body**:
-```json
-{
-    "text": "Your customer support question here"
-}
-```
-- **Response**:
-```json
-{
-    "response": "AI-generated response",
-    "contexts": ["relevant context 1", "relevant context 2"],
-    "confidence_score": 85
-}
+1. Build the Docker image:
+```bash
+docker build -t customer-support-chatbot .
 ```
 
-### 2. Get Recent Interactions
-- **Endpoint**: `/interactions`
-- **Method**: GET
-- **Query Parameters**:
-  - `limit`: Number of interactions to retrieve (default: 10)
-- **Response**: List of recent interactions with their details
+2. Run the container:
+```bash
+docker run -p 8000:8000 customer-support-chatbot
+```
 
-### 3. Root Endpoint
-- **Endpoint**: `/`
-- **Method**: GET
-- **Response**: API information and available endpoints
+## 📡 API Endpoints
 
-## Architecture
+- `GET /`: Main application interface
+- `POST /query`: Process customer queries
+- `GET /interactions`: Retrieve interaction history
+- `GET /health`: Health check endpoint
 
-The system consists of three main components:
+## 🔍 RAG System Configuration
 
-1. **RAG System** (`src/rag.py`):
-   - Handles the retrieval and generation of responses
-   - Uses sentence transformers for embeddings
-   - Implements FAISS for efficient similarity search
+The application supports different search and reranking methods:
 
-2. **Database** (`src/database.py`):
-   - SQLite database using SQLAlchemy
-   - Stores customer interactions and their metadata
+- **Search Methods**: KNN (default), configurable via `SEARCH_METHOD`
+- **Reranking**: Optional, configurable via `RERANK_METHOD`
+- **Storage**: Local storage by default, configurable via `STORAGE_TYPE`
 
-3. **API** (`src/main.py`):
-   - FastAPI application
-   - Handles HTTP requests
-   - Integrates RAG system with database
+## 📊 Database Schema
 
-## Contributing
+The application uses SQLAlchemy ORM with the following main model:
 
-Feel free to submit issues and enhancement requests! 
+- `CustomerInteraction`: Stores query, response, context, and evaluation data
+
+## 🔐 Security
+
+- CORS is configured for specific origins
+- Session management with secure cookies
+- Environment variable based configuration
+- Automatic session cleanup after 24 hours of inactivity
+
+## 📈 Monitoring
+
+- Built-in logging system
+- Health check endpoint
+- Response evaluation metrics
+- Confidence scoring
+
+## 🤝 Contributing
+
+1. Fork the repository
+2. Create a feature branch
+3. Commit your changes
+4. Push to the branch
+5. Create a Pull Request
+
+## 📝 License
+
+[Add your license information here]
+
+## 👥 Authors
+
+[Add author information here]
+
+## 🙏 Acknowledgments
+
+- FastAPI framework
+- SQLAlchemy ORM
+- OpenAI API
+- APScheduler for background tasks 

@@ -1,0 +1,7 @@
+# Customer Support AI Chatbot - Resume Summary
+
+Developed and deployed a sophisticated AI-powered customer support chatbot system using FastAPI and Retrieval-Augmented Generation (RAG) technology. Engineered a robust microservices architecture with configurable search algorithms and reranking capabilities, resulting in contextually relevant responses to customer queries. Implemented secure session management, automatic cleanup of inactive sessions, and comprehensive logging system for monitoring and debugging.
+
+Containerized the application using Docker and implemented environment-based configuration for seamless deployment. Built a sophisticated response evaluation system using OpenAI's API and integrated PostgreSQL with SQLAlchemy ORM for efficient data storage. The system features RESTful APIs with async/await patterns, CORS middleware for secure cross-origin requests, and health monitoring endpoints, demonstrating expertise in full-stack development and DevOps practices.
+
+The implementation resulted in reduced response times, improved response quality through configurable search and reranking, and enhanced system reliability. The project showcases advanced skills in AI/ML integration, system architecture, security implementation, and performance optimization, while maintaining high standards in code quality and documentation. 

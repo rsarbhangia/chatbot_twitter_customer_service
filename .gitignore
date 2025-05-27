@@ -1,4 +1,4 @@
-cache/
+cache*/
 .env
 mangal_project_env/
 __pycache__/

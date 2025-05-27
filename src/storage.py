@@ -116,6 +116,7 @@ class R2StorageStrategy(StorageStrategy):
             elif file_type == "index":
                 file_extension = ".bin"
             
+            logger.info(f"Loading {file_type} from R2: archive/{key}{file_extension}")
             # Download from R2 with proper file extension
             response = self.client.get_object(
                 Bucket=self.bucket_name,
